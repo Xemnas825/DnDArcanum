@@ -1,0 +1,5 @@
+storePassword=CAMBIAME
+keyPassword=CAMBIAME
+keyAlias=dungeon
+storeFile=../keystore/dungeon-companion.jks
+
