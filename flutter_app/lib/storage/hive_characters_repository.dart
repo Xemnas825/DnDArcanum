@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:async';
 
+import '../cloud/cloud_characters_sync.dart';
 import '../data/dummy_character.dart';
 import '../models/character.dart';
 import '../utils/uid.dart';
@@ -10,6 +12,9 @@ class HiveCharactersRepository implements CharactersRepository {
   static const _lastActiveKey = 'lastActiveCharacterId';
   static const _schemaVersionKey = 'schemaVersion';
   static const _schemaVersion = 1;
+  static const _updatedAtPrefix = 'characterUpdatedAtMs:';
+
+  final CloudCharactersSync _cloud = CloudCharactersSync();
 
   @override
   Future<List<Character>> list() async {
@@ -60,11 +65,21 @@ class HiveCharactersRepository implements CharactersRepository {
           )
         : character;
     await LocalDb.characters.put(id, jsonEncode(fixed.toJson()));
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await LocalDb.meta.put('$_updatedAtPrefix$id', now);
+    // Best-effort cloud sync; never block local save.
+    unawaited(_cloud.upsert(fixed, updatedAtMs: now).catchError((_) {}));
     await _ensureSchema();
   }
 
   @override
-  Future<void> delete(String id) => LocalDb.characters.delete(id);
+  Future<void> delete(String id) async {
+    await LocalDb.characters.delete(id);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await LocalDb.meta.put('$_updatedAtPrefix$id', now);
+    // Best-effort: mark as deleted so other devices remove it.
+    unawaited(_cloud.tombstone(id, updatedAtMs: now).catchError((_) {}));
+  }
 
   @override
   Future<String?> getLastActiveId() async {
@@ -219,6 +234,60 @@ class HiveCharactersRepository implements CharactersRepository {
       await setLastActiveId(last);
     }
     await _ensureSchema();
+  }
+
+  int localUpdatedAtMs(String id) {
+    final v = LocalDb.meta.get('$_updatedAtPrefix$id');
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
+  Future<void> pullFromCloudAndMerge() async {
+    final remote = await _cloud.listRemote();
+    for (final doc in remote) {
+      final id = doc['id'];
+      if (id is! String || id.isEmpty) continue;
+
+      final updatedAt = doc['updatedAtMs'];
+      final updatedAtMs = updatedAt is num ? updatedAt.toInt() : 0;
+      if (updatedAtMs <= localUpdatedAtMs(id)) continue;
+
+      final deleted = doc['deleted'] == true;
+      if (deleted) {
+        await LocalDb.characters.delete(id);
+        await LocalDb.meta.put('$_updatedAtPrefix$id', updatedAtMs);
+        continue;
+      }
+
+      final payload = doc['character'];
+      if (payload is! Map) continue;
+      final c = Character.fromJson(payload.cast<String, dynamic>());
+      final fixed = c.id.isEmpty ? _withId(c, id) : c;
+      await LocalDb.characters.put(id, jsonEncode(fixed.toJson()));
+      await LocalDb.meta.put('$_updatedAtPrefix$id', updatedAtMs);
+    }
+  }
+
+  Future<void> pushAllToCloud() async {
+    final entries = LocalDb.characters.toMap().entries;
+    for (final entry in entries) {
+      final id = entry.key.toString();
+      final raw = entry.value;
+      final c = _decodeCharacter(raw, fallbackId: id);
+      final updatedAtMs = localUpdatedAtMs(id);
+      final stamp = updatedAtMs == 0 ? DateTime.now().millisecondsSinceEpoch : updatedAtMs;
+      await _cloud.upsert(c, updatedAtMs: stamp);
+      if (updatedAtMs == 0) {
+        await LocalDb.meta.put('$_updatedAtPrefix$id', stamp);
+      }
+    }
+  }
+
+  /// Pulls remote changes, then pushes local state (best effort "sync now").
+  Future<void> syncNow() async {
+    await pullFromCloudAndMerge();
+    await pushAllToCloud();
   }
 
   Character _decodeCharacter(String raw, {required String fallbackId}) {

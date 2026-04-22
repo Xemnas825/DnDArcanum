@@ -70,6 +70,34 @@ class Spell {
   final String description;
   final int slotsUsed;
 
+  Spell copyWith({
+    String? id,
+    String? name,
+    int? level,
+    String? school,
+    String? castingTime,
+    String? range,
+    String? components,
+    String? duration,
+    String? damageDice,
+    String? description,
+    int? slotsUsed,
+  }) {
+    return Spell(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      level: level ?? this.level,
+      school: school ?? this.school,
+      castingTime: castingTime ?? this.castingTime,
+      range: range ?? this.range,
+      components: components ?? this.components,
+      duration: duration ?? this.duration,
+      damageDice: damageDice ?? this.damageDice,
+      description: description ?? this.description,
+      slotsUsed: slotsUsed ?? this.slotsUsed,
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -112,6 +140,13 @@ class ItemEffect {
   final String description;
   final bool enabled;
 
+  ItemEffect copyWith({String? id, String? name, String? description, bool? enabled}) => ItemEffect(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        description: description ?? this.description,
+        enabled: enabled ?? this.enabled,
+      );
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -133,6 +168,9 @@ class Charges {
   final int current;
   final int max;
 
+  Charges copyWith({int? current, int? max}) =>
+      Charges(current: current ?? this.current, max: max ?? this.max);
+
   Map<String, dynamic> toJson() => {'current': current, 'max': max};
 
   factory Charges.fromJson(Map<String, dynamic> json) => Charges(
@@ -151,6 +189,12 @@ class ItemModifier {
   final ModifierStat stat; // "ac" | "speed" | "hpMax" | "attack" | "damage" | "save"
   final int value;
   final bool enabled;
+
+  ItemModifier copyWith({ModifierStat? stat, int? value, bool? enabled}) => ItemModifier(
+        stat: stat ?? this.stat,
+        value: value ?? this.value,
+        enabled: enabled ?? this.enabled,
+      );
 
   Map<String, dynamic> toJson() => {
         'stat': stat,
@@ -195,6 +239,38 @@ class Item {
   final int? speedBonus;
   final List<ItemModifier>? modifiers;
   final List<ItemEffect>? effects;
+
+  Item copyWith({
+    String? id,
+    String? name,
+    int? quantity,
+    double? weight,
+    String? description,
+    Charges? charges,
+    RechargeType? recharge,
+    bool? equippable,
+    bool? equipped,
+    int? acBonus,
+    int? speedBonus,
+    List<ItemModifier>? modifiers,
+    List<ItemEffect>? effects,
+  }) {
+    return Item(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      quantity: quantity ?? this.quantity,
+      weight: weight ?? this.weight,
+      description: description ?? this.description,
+      charges: charges ?? this.charges,
+      recharge: recharge ?? this.recharge,
+      equippable: equippable ?? this.equippable,
+      equipped: equipped ?? this.equipped,
+      acBonus: acBonus ?? this.acBonus,
+      speedBonus: speedBonus ?? this.speedBonus,
+      modifiers: modifiers ?? this.modifiers,
+      effects: effects ?? this.effects,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,

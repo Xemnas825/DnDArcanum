@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "301545055646",
+    "project_id": "dnd-arcanum-c17f6",
+    "storage_bucket": "dnd-arcanum-c17f6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:301545055646:android:52567e9effc81993d4228f",
+        "android_client_info": {
+          "package_name": "com.aracanum.dungeon_companion"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCwqXHjXtnTdPcPNb-DJ6Ea9j1U1uiwbd8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

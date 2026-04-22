@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
+import 'cloud/cloud_backup_service.dart';
+import 'cloud/cloud_auth_service.dart';
+import 'firebase_options.dart';
 import 'models/character.dart';
 import 'state/character_controller.dart';
 import 'theme/app_theme.dart';
@@ -13,6 +19,13 @@ import 'storage/local_db.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LocalDb.init();
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (_) {
+    // Firebase is optional for the app to function offline.
+  }
   runApp(const MyApp());
 }
 
@@ -38,12 +51,26 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late final CharacterController ctrl;
+  late final HiveCharactersRepository repo;
+  final _auth = CloudAuthService();
 
   @override
   void initState() {
     super.initState();
-    ctrl = CharacterController(HiveCharactersRepository());
+    repo = HiveCharactersRepository();
+    ctrl = CharacterController(repo);
     ctrl.init();
+    // Best-effort cloud pull (doesn't block UI). Refreshes character list after merge.
+    unawaited(_pullCloud());
+  }
+
+  Future<void> _pullCloud() async {
+    try {
+      await repo.pullFromCloudAndMerge();
+      await ctrl.init();
+    } catch (_) {
+      // Cloud sync is optional; ignore errors.
+    }
   }
 
   @override
@@ -62,6 +89,13 @@ class _HomeScreenState extends State<HomeScreen> {
           appBar: AppBar(
             title: Text(c == null ? 'Dungeon Companion' : c.name),
             actions: [
+              IconButton(
+                tooltip: 'Cuenta / Sync',
+                onPressed: () async {
+                  await showAccountSheet(context, repo, ctrl, _auth);
+                },
+                icon: const Icon(Icons.manage_accounts),
+              ),
               IconButton(
                 tooltip: 'Personajes',
                 onPressed: ctrl.loading
@@ -135,6 +169,127 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
+}
+
+Future<void> showAccountSheet(
+  BuildContext context,
+  HiveCharactersRepository repo,
+  CharacterController ctrl,
+  CloudAuthService auth,
+) async {
+  await showModalBottomSheet(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 8,
+        bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+      ),
+      child: StreamBuilder<User?>(
+        stream: auth.authStateChanges(),
+        builder: (context, snap) {
+          final user = snap.data ?? auth.currentUser;
+          final email = user?.email;
+          final isAnon = user?.isAnonymous ?? true;
+          final uid = user?.uid ?? '(sin sesión)';
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: const [
+                  Icon(Icons.manage_accounts),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text('Cuenta / Sincronización', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              FantasyCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('UID: $uid', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    Text('Email: ${email ?? (isAnon ? '(anónimo)' : '(sin email)')}'),
+                    const SizedBox(height: 6),
+                    Text('Estado: ${isAnon ? 'Anónimo' : 'Con cuenta'}'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              FantasyCard(
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(ctx);
+                  messenger.showSnackBar(const SnackBar(content: Text('Sincronizando...')));
+                  try {
+                    await repo.syncNow();
+                    await ctrl.init();
+                    messenger.showSnackBar(const SnackBar(content: Text('Sincronización completa.')));
+                  } catch (_) {
+                    messenger.showSnackBar(const SnackBar(content: Text('No pude sincronizar (¿Firestore/Auth habilitados?).')));
+                  }
+                },
+                child: Row(
+                  children: const [
+                    Icon(Icons.sync, color: AppTheme.goldSoft),
+                    SizedBox(width: 12),
+                    Expanded(child: Text('Sincronizar ahora (nube + local)')),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              FantasyCard(
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(ctx);
+                  try {
+                    if (isAnon) {
+                      await auth.linkAnonymousWithGoogle();
+                    } else {
+                      await auth.signInWithGoogle();
+                    }
+                    messenger.showSnackBar(const SnackBar(content: Text('Sesión con Google lista.')));
+                  } catch (_) {
+                    messenger.showSnackBar(const SnackBar(content: Text('No pude iniciar/vincular con Google.')));
+                  }
+                },
+                child: Row(
+                  children: const [
+                    Icon(Icons.login, color: AppTheme.goldSoft),
+                    SizedBox(width: 12),
+                    Expanded(child: Text('Entrar / Vincular con Google')),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              FantasyCard(
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(ctx);
+                  try {
+                    await auth.signOut();
+                    messenger.showSnackBar(const SnackBar(content: Text('Sesión cerrada.')));
+                  } catch (_) {
+                    messenger.showSnackBar(const SnackBar(content: Text('No pude cerrar sesión.')));
+                  }
+                },
+                child: Row(
+                  children: const [
+                    Icon(Icons.logout, color: Color(0xFFE57373)),
+                    SizedBox(width: 12),
+                    Expanded(child: Text('Cerrar sesión')),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    ),
+  );
 }
 
 class _CoinsPanel extends StatelessWidget {
@@ -2691,6 +2846,99 @@ Future<void> showBackupSheet(BuildContext context, CharacterController ctrl) asy
                 Icon(Icons.download, color: AppTheme.goldSoft),
                 SizedBox(width: 12),
                 Expanded(child: Text('Importar backup (JSON)')),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          FantasyCard(
+            onTap: () async {
+              final messenger = ScaffoldMessenger.of(ctx);
+              try {
+                final json = await ctrl.exportAllToJson();
+                await CloudBackupService().uploadJsonBackup(json: json);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Backup subido a la nube.')),
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+              } catch (_) {
+                if (!ctx.mounted) return;
+                await showDialog<void>(
+                  context: ctx,
+                  builder: (dctx) => AlertDialog(
+                    title: const Text('Nube no configurada'),
+                    content: const Text(
+                      'Para usar backup en la nube (gratis) tenés que configurar Firebase en este proyecto.\n\n'
+                      'Recomendado: ejecutar "flutterfire configure" y agregar los archivos:\n'
+                      '- Android: android/app/google-services.json\n'
+                      '- iOS: ios/Runner/GoogleService-Info.plist\n\n'
+                      'Mientras tanto, seguí usando Exportar/Importar JSON (offline).',
+                    ),
+                    actions: [
+                      FilledButton(onPressed: () => Navigator.pop(dctx), child: const Text('OK')),
+                    ],
+                  ),
+                );
+              }
+            },
+            child: Row(
+              children: const [
+                Icon(Icons.cloud_upload, color: AppTheme.goldSoft),
+                SizedBox(width: 12),
+                Expanded(child: Text('Subir backup a la nube (Firebase)')),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          FantasyCard(
+            onTap: () async {
+              final messenger = ScaffoldMessenger.of(ctx);
+              try {
+                final json = await CloudBackupService().downloadLatestJsonBackup();
+                if (json == null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('No hay backup en la nube todavía.')),
+                  );
+                  return;
+                }
+                if (!ctx.mounted) return;
+                final replace = await showDialog<bool>(
+                  context: ctx,
+                  builder: (dctx) => AlertDialog(
+                    title: const Text('Restaurar desde nube'),
+                    content: const Text('¿Querés reemplazar todo (borrar personajes actuales) o mezclar?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Mezclar')),
+                      FilledButton(onPressed: () => Navigator.pop(dctx, true), child: const Text('Reemplazar')),
+                    ],
+                  ),
+                );
+                await ctrl.importFromJson(json, replace: replace == true);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Backup restaurado desde la nube.')),
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+              } catch (_) {
+                if (!ctx.mounted) return;
+                await showDialog<void>(
+                  context: ctx,
+                  builder: (dctx) => AlertDialog(
+                    title: const Text('Nube no configurada'),
+                    content: const Text(
+                      'No pude conectarme a Firebase. Configuralo con FlutterFire y luego reintentá.\n\n'
+                      'Mientras tanto, seguí usando Exportar/Importar JSON (offline).',
+                    ),
+                    actions: [
+                      FilledButton(onPressed: () => Navigator.pop(dctx), child: const Text('OK')),
+                    ],
+                  ),
+                );
+              }
+            },
+            child: Row(
+              children: const [
+                Icon(Icons.cloud_download, color: AppTheme.goldSoft),
+                SizedBox(width: 12),
+                Expanded(child: Text('Restaurar backup desde la nube (Firebase)')),
               ],
             ),
           ),

@@ -59,6 +59,8 @@ class CharacterController extends ChangeNotifier {
       .fold<double>(0, (s, i) => s + (i.weight * i.quantity));
 
   Future<void> init() async {
+    _loading = true;
+    notifyListeners();
     _characters = await _repo.list();
     _activeId = await _repo.getLastActiveId();
 
@@ -297,21 +299,7 @@ class CharacterController extends ChangeNotifier {
   Future<void> adjustSpellSlots(String id, int delta) async {
     final c = _character!;
     final nextSpells = c.spells
-        .map((s) => s.id == id
-            ? Spell(
-                id: s.id,
-                name: s.name,
-                level: s.level,
-                school: s.school,
-                castingTime: s.castingTime,
-                range: s.range,
-                components: s.components,
-                duration: s.duration,
-                damageDice: s.damageDice,
-                description: s.description,
-                slotsUsed: (s.slotsUsed + delta).clamp(0, 999999),
-              )
-            : s)
+        .map((s) => s.id == id ? s.copyWith(slotsUsed: (s.slotsUsed + delta).clamp(0, 999999)) : s)
         .toList();
     await _set(_rebuild(c, spells: nextSpells));
   }
@@ -333,22 +321,7 @@ class CharacterController extends ChangeNotifier {
   Future<void> adjustItemQty(String id, int delta) async {
     final c = _character!;
     final nextItems = c.items
-        .map((i) => i.id == id
-            ? Item(
-                id: i.id,
-                name: i.name,
-                quantity: (i.quantity + delta).clamp(0, 999999),
-                weight: i.weight,
-                description: i.description,
-                charges: i.charges,
-                recharge: i.recharge,
-                equippable: i.equippable,
-                equipped: i.equipped,
-                acBonus: i.acBonus,
-                speedBonus: i.speedBonus,
-                effects: i.effects,
-              )
-            : i)
+        .map((i) => i.id == id ? i.copyWith(quantity: (i.quantity + delta).clamp(0, 999999)) : i)
         .toList();
     await _set(_rebuild(c, items: nextItems));
   }
@@ -358,20 +331,7 @@ class CharacterController extends ChangeNotifier {
     final nextItems = c.items.map((i) {
       if (i.id != id || i.charges == null) return i;
       final next = (i.charges!.current + delta).clamp(0, i.charges!.max);
-      return Item(
-        id: i.id,
-        name: i.name,
-        quantity: i.quantity,
-        weight: i.weight,
-        description: i.description,
-        charges: Charges(current: next, max: i.charges!.max),
-        recharge: i.recharge,
-        equippable: i.equippable,
-        equipped: i.equipped,
-        acBonus: i.acBonus,
-        speedBonus: i.speedBonus,
-        effects: i.effects,
-      );
+      return i.copyWith(charges: i.charges!.copyWith(current: next));
     }).toList();
     await _set(_rebuild(c, items: nextItems));
   }
@@ -379,22 +339,7 @@ class CharacterController extends ChangeNotifier {
   Future<void> toggleEquipped(String id) async {
     final c = _character!;
     final nextItems = c.items
-        .map((i) => i.id == id
-            ? Item(
-                id: i.id,
-                name: i.name,
-                quantity: i.quantity,
-                weight: i.weight,
-                description: i.description,
-                charges: i.charges,
-                recharge: i.recharge,
-                equippable: i.equippable,
-                equipped: !(i.equipped ?? false),
-                acBonus: i.acBonus,
-                speedBonus: i.speedBonus,
-                effects: i.effects,
-              )
-            : i)
+        .map((i) => i.id == id ? i.copyWith(equipped: !(i.equipped ?? false)) : i)
         .toList();
     await _set(_rebuild(c, items: nextItems));
   }
